@@ -80,7 +80,7 @@ def dump():
     seen_connections = set()
 
     for source, dests in connections.items():
-        client, port = source.split(":")
+        client, port = source.split(":", 1)
         if client not in formatted_connections:
             formatted_connections[client] = {}
 
