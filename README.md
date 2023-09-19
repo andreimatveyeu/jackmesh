@@ -67,6 +67,10 @@ out2 = [ "Built-in Audio Pro:playback_AUX1",]
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
+## See also
+
+- [jackmesh: A Tool for Managing Jack Audio Server Connections](https://www.omnitonal.com/jackmesh-a-tool-for-managing-jack-audio-server-connections/)
+
 ## License
 
 [GNU GPL v3](https://github.com/omnitonal/jackmesh/blob/main/LICENSE)
