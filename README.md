@@ -45,6 +45,8 @@ If no file is specified, `jackmesh` will by default look for `~/.jack_connection
 jackmesh -l
 ```
 
+The assumption is that the TOML file provides the complete connection configuration and no other connections shall exist. Before applying the config file all existing connections will be removed.
+
 ## Configuration
 
 `jackmesh` uses TOML format for its configuration files. An example of the configuration file:
@@ -62,6 +64,9 @@ capture_AUX1 = [ "REAPER:in2",]
 out1 = [ "Built-in Audio Pro:playback_AUX0",]
 out2 = [ "Built-in Audio Pro:playback_AUX1",]
 ```
+
+The target port names in the lists can be given as substrings. A more robust implementation would be needed, like the possibility to specify target ports using regular expressions.
+
 
 ## Contributing
 
