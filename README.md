@@ -65,9 +65,6 @@ out1 = [ "Built-in Audio Pro:playback_AUX0",]
 out2 = [ "Built-in Audio Pro:playback_AUX1",]
 ```
 
-The target port names in the lists can be given as substrings. A more robust implementation would be needed, like the possibility to specify target ports using regular expressions.
-
-
 ## Contributing
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.

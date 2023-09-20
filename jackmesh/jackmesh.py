@@ -66,9 +66,12 @@ class PortConnection:
 
 class JackHandler:
     def __init__(self):
-        pass
+        self.ports = None
 
     def get_jack_ports(self) -> List[Port]:
+        if self.ports is not None:
+            return self.ports
+
         properties_output = self._run_jack_lsp('-p')
         type_output = self._run_jack_lsp('-t')
         uuid_output = self._run_jack_lsp('-U')
@@ -82,14 +85,12 @@ class JackHandler:
         latency_dict = self._parse_latency(latency_output)
         total_latency_dict = self._parse_total_latency(total_latency_output)
 
-        return self._create_ports(properties_output, type_dict, uuid_dict, alias_dict, latency_dict, total_latency_dict)
+        self.ports = self._create_ports(properties_output, type_dict, uuid_dict, alias_dict, latency_dict, total_latency_dict)
+        return self.ports
 
-    def find_port_by_substrings(self, substrings):
-        """Finds a port where its name contains all given substrings."""
-        ports = self.get_jack_ports()
-
-        for port in ports:
-            if all(substr in port.name for substr in substrings):
+    def get_port_by_name(self, port_name):
+        for port in self.get_jack_ports():
+            if port.name == port_name:
                 return port
         return None
 
@@ -220,17 +221,20 @@ def load(config_path):
 
     # Process each section in the TOML file to establish new connections
     for client, port_map in config.items():
-        for output, input_substrings in port_map.items():
-            output_port = jh.find_port_by_substrings(substrings=[f"{client}:{output}"])
-            input_port = jh.find_port_by_substrings(substrings=input_substrings)
-
-            if output_port and input_port:
+        for output, inputs in port_map.items():
+            output_port_name = f"{client}:{output}"
+            output_port = jh.get_port_by_name(output_port_name)
+            if output_port is None:
+                print(f"Could not find port: {output_port_name}")
+                continue
+            for inp in inputs:
+                input_port = jh.get_port_by_name(inp)
+                if input_port is None:
+                    print(f"Could not find port: {inp}")
+                    continue
                 connection = PortConnection(output=output_port, input=input_port)
                 print(f"Connecting {output_port.name} to {input_port.name}...")
                 connection.connect()
-            else:
-                print(f"Could not establish connection for {client} -> {output}")
-
 
 def dump():
     jh = JackHandler()
