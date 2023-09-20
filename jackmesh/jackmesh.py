@@ -2,7 +2,10 @@ import subprocess
 import toml
 import argparse
 import os
+import sys
 from typing import List, Literal
+import jacklib
+from jacklib.helpers import c_char_p_p_to_list, get_jack_status_error_string
 
 import subprocess
 from typing import List, Dict
@@ -14,10 +17,12 @@ from typing import Optional
 
 class Port:
 
-    def __init__(self, name: str, client: str, port_name: str, port_type: str, uuid: str, direction: str,
+    def __init__(self, port_ptr, name: str, client: str, client_ptr, port_name: str, port_type: str, uuid: str, direction: str,
                  aliases: List[str], in_latency: int, out_latency: int, total_latency: int):
+        self.port_ptr = port_ptr
         self.name = name
         self.client = client
+        self.client_ptr = client_ptr
         self.port_name = port_name
         self.port_type = port_type
         self.uuid = uuid
@@ -34,7 +39,9 @@ class Port:
         self.uuid == other.uuid
 
 class PortConnection:
-    def __init__(self, output: Optional['Port'] = None, input: Optional['Port'] = None):
+
+    def __init__(self, client, output: Optional['Port'] = None, input: Optional['Port'] = None):
+        self.client = client
         if output and output.direction != 'output':
             raise ValueError(f"Expected an output port, but got {output.direction} port: {output.name}")
         if input and input.direction != 'input':
@@ -52,80 +59,88 @@ class PortConnection:
         return self.output.name == other.output.name and self.input.name == other.input.name
 
     def disconnect(self):
-        try:
-            subprocess.run(["jack_disconnect", self.output.name, self.input.name], check=True, stderr=subprocess.PIPE)
-        except subprocess.CalledProcessError as e:
-            # Check if error indicates already disconnected
-            if "already disconnected" not in e.stderr.decode('utf-8'):
-                raise e
+        # Disconnect output
+        status = jacklib.jack_status_t()
+        result = jacklib.port_disconnect(self.client, self.output.port_ptr)
+        if result != 0:
+            error_msg = get_jack_status_error_string(status)
+            raise Exception(f"Error disconnecting output: {error_msg}")
+
+        # Disconnect input
+        status = jacklib.jack_status_t()
+        result = jacklib.port_disconnect(self.client, self.input.port_ptr)
+        if result != 0:
+            error_msg = get_jack_status_error_string(status)
+            raise Exception(f"Error disconnecting input: {error_msg}")
 
     def connect(self):
-        """Connects the output and input ports of this connection using the jack_connect command."""
-        subprocess.run(["jack_connect", self.output.name, self.input.name], check=True)
+        status = jacklib.jack_status_t()
+        result = jacklib.connect(self.client, self.output.name, self.input.name)
+
+        # Handling any errors if they arise
+        if result != 0:
+            error_msg = get_jack_status_error_string(status)
+            raise Exception(f"Error connecting: {error_msg}")
 
 
 class JackHandler:
+
     def __init__(self):
+        status = jacklib.jack_status_t()
+        self.client = jacklib.client_open("PythonJackClient", jacklib.JackNoStartServer, status)
+        err = get_jack_status_error_string(status)
+
+        if status.value:
+            if status.value & jacklib.JackNameNotUnique:
+                print("Non-fatal JACK status: %s" % err, file=sys.stderr)
+            elif status.value & jacklib.JackServerStarted:
+                # Should not happen, since we use the JackNoStartServer option
+                print("Unexpected JACK status: %s" % err, file=sys.stderr)
+            else:
+                raise Exception("Error connecting to JACK server: %s" % err)
+
         self.ports = None
 
     def get_jack_ports(self) -> List[Port]:
         if self.ports is not None:
             return self.ports
 
-        properties_output = self._run_jack_lsp('-p')
-        type_output = self._run_jack_lsp('-t')
-        uuid_output = self._run_jack_lsp('-U')
-        alias_output = self._run_jack_lsp('-A')
-        latency_output = self._run_jack_lsp('-l')
-        total_latency_output = self._run_jack_lsp('-L')
+        port_names = c_char_p_p_to_list(jacklib.get_ports(self.client))
+        self.ports = []
 
-        type_dict = self._parse_type(type_output)
-        uuid_dict = self._parse_uuid(uuid_output)
-        alias_dict = self._parse_aliases(alias_output)
-        latency_dict = self._parse_latency(latency_output)
-        total_latency_dict = self._parse_total_latency(total_latency_output)
+        for port_name in port_names:
+            port_ptr = jacklib.port_by_name(self.client, port_name)
+            uuid = jacklib.port_uuid(port_ptr)
+            client, port_short_name = port_name.split(":", 1)
 
-        self.ports = self._create_ports(properties_output, type_dict, uuid_dict, alias_dict, latency_dict, total_latency_dict)
-        return self.ports
+            port_type = jacklib.port_type(port_ptr)
+            port_flags = jacklib.port_flags(port_ptr)
+            direction = "input" if port_flags & jacklib.JackPortIsInput else "output"
+
+            aliases = jacklib.port_get_aliases(port_ptr)[1:]
+
+
+            in_range = jacklib.jack_latency_range_t()
+            out_range = jacklib.jack_latency_range_t()
+
+            jacklib.port_get_latency_range(port_ptr, jacklib.JackCaptureLatency, in_range)
+            jacklib.port_get_latency_range(port_ptr, jacklib.JackPlaybackLatency, out_range)
+
+            in_latency = in_range.min  # or in_range.max based on the range specifics
+            out_latency = out_range.min  # or out_range.max based on the range specifics
+
+            total_latency = jacklib.port_get_total_latency(self.client, port_ptr)
+
+            port_instance = Port(port_ptr, port_name, client, self.client, port_short_name, port_type, uuid, direction, aliases, in_latency, out_latency, total_latency)
+            self.ports.append(port_instance)
+
+        return self.client, self.ports
 
     def get_port_by_name(self, port_name):
         for port in self.get_jack_ports():
             if port.name == port_name:
                 return port
         return None
-
-    def _run_jack_lsp(self, option: str) -> List[str]:
-        return subprocess.run(['jack_lsp', option], capture_output=True, text=True).stdout.splitlines()
-
-    def _parse_type(self, output: List[str]) -> Dict[str, str]:
-        return {output[i]: output[i + 1].strip() for i in range(0, len(output), 2)}
-
-    def _parse_uuid(self, output: List[str]) -> Dict[str, str]:
-        return {output[i]: output[i + 1].split(":")[1].strip() for i in range(0, len(output), 2)}
-
-    def _parse_aliases(self, output: List[str]) -> Dict[str, List[str]]:
-        alias_dict = {}
-        i = 0
-        while i < len(output):
-            key = output[i]
-            aliases = []
-            i += 1
-            while i < len(output) and output[i].startswith("   "):  # Check for indentation
-                aliases.append(output[i].strip())
-                i += 1
-            alias_dict[key] = aliases
-        return alias_dict
-
-    def _parse_latency(self, output: List[str]) -> Dict[str, Tuple[int, int]]:
-        latency_dict = {}
-        for i in range(0, len(output), 3):
-            out_latency = int(output[i + 1].split("[")[1].split()[0])
-            in_latency = int(output[i + 2].split("[")[1].split()[0])
-            latency_dict[output[i]] = (in_latency, out_latency)
-        return latency_dict
-
-    def _parse_total_latency(self, output: List[str]) -> Dict[str, int]:
-        return {output[i]: int(output[i + 1].split("=")[1].split()[0]) for i in range(0, len(output), 2)}
 
     def _create_ports(self, properties_output: List[str], type_dict: Dict[str, str], uuid_dict: Dict[str, str],
                     alias_dict: Dict[str, List[str]], latency_dict: Dict[str, Tuple[int, int]],
@@ -157,7 +172,7 @@ class JackHandler:
     def get_jack_connections(self) -> List[PortConnection]:
         """Fetch JACK connections using the jack_lsp command and return them as a list of PortConnection instances."""
         # Retrieve all Port instances
-        ports = self.get_jack_ports()
+        client, ports = self.get_jack_ports()
         port_map = {port.name: port for port in ports}  # Create a dict for easy lookup
 
         # Read the connections
@@ -183,7 +198,7 @@ class JackHandler:
 
                 # Check if the source is an output and the destination is an input
                 if source_port and dest_port and source_port.direction == "output" and dest_port.direction == "input":
-                    connection = PortConnection(output=source_port, input=dest_port)
+                    connection = PortConnection(client, output=source_port, input=dest_port)
                     # Ensure we're not adding duplicate connections
                     if connection not in connections:
                         connections.append(connection)
@@ -232,7 +247,7 @@ def load(config_path):
                 if input_port is None:
                     print(f"Could not find port: {inp}")
                     continue
-                connection = PortConnection(output=output_port, input=input_port)
+                connection = PortConnection(output_port.client_ptr, output=output_port, input=input_port)
                 print(f"Connecting {output_port.name} to {input_port.name}...")
                 connection.connect()
 
