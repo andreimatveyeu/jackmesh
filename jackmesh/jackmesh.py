@@ -2,6 +2,7 @@ import subprocess
 import toml
 import argparse
 import os
+import re
 import sys
 from typing import List, Literal
 import jacklib
@@ -142,6 +143,18 @@ class JackHandler:
                 return port
         return None
 
+    def get_port_by_regex(self, port_regex):
+        """Get port by name regex.
+
+        Limitation: returns first regex match in list.
+        """
+        pattern = re.compile(port_regex)
+        for port in self.get_jack_ports():
+            if pattern.match(port.name):
+                return port
+        return None
+
+
     def _create_ports(self, properties_output: List[str], type_dict: Dict[str, str], uuid_dict: Dict[str, str],
                     alias_dict: Dict[str, List[str]], latency_dict: Dict[str, Tuple[int, int]],
                     total_latency_dict: Dict[str, int]) -> List[Port]:
@@ -222,7 +235,7 @@ class JackHandler:
         return [port for port in ports if port.client == client_name]
 
 
-def load(config_path):
+def load(config_path, regex_matching=False):
     jh = JackHandler()
 
     # Load TOML configuration
@@ -238,12 +251,26 @@ def load(config_path):
     for client, port_map in config.items():
         for output, inputs in port_map.items():
             output_port_name = f"{client}:{output}"
-            output_port = jh.get_port_by_name(output_port_name)
+            if not output_port_name.startswith("regex:"):
+                output_port = jh.get_port_by_name(output_port_name)
+            elif regex_matching:
+                output_port_name = output_port_name.replace("regex:", "")
+                output_port = jh.get_port_by_regex(output_port_name)
+            else:
+                raise RuntimeError("Port spec {output_port_name} requires regex matching to be enabled (-r flag)")
+
             if output_port is None:
                 print(f"Could not find port: {output_port_name}")
                 continue
             for inp in inputs:
-                input_port = jh.get_port_by_name(inp)
+                if not inp.startswith("regex:"):
+                    input_port = jh.get_port_by_name(inp)
+                elif regex_matching:
+                    inp = inp.replace("regex:", "")
+                    input_port = jh.get_port_by_regex(inp)
+                else:
+                    raise RuntimeError("Port spec {output_port_name} requires regex matching to be enabled (-r flag)")
+
                 if input_port is None:
                     print(f"Could not find port: {inp}")
                     continue
@@ -296,6 +323,10 @@ def main():
 
     parser.add_argument('-d', '--dump', action="store_true",
                         help='Dump the current connections into a TOML configuration file. Provide the path to save the file.')
+    parser.add_argument('-r', '--regex', action="store_true", default=False,
+                        help=f'Use regular expressions for client and port name matching')
+
+
 
     # Parse the provided arguments.
     args = parser.parse_args()
@@ -310,7 +341,7 @@ def main():
     if args.dump:
         dump()
     elif args.load:
-        load(args.load)
+        load(args.load, regex_matching=args.regex)
 
 if __name__ == "__main__":
     main()
