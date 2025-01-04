@@ -135,7 +135,7 @@ class JackHandler:
             port_instance = Port(port_ptr, port_name, client, self.client, port_short_name, port_type, uuid, direction, aliases, in_latency, out_latency, total_latency)
             self.ports.append(port_instance)
 
-        return self.client, self.ports
+        return self.ports
 
     def get_port_by_name(self, port_name):
         for port in self.get_jack_ports():
@@ -149,8 +149,7 @@ class JackHandler:
         Limitation: returns first regex match in list.
         """
         pattern = re.compile(port_regex)
-        _, ports = self.get_jack_ports()
-        for port in ports:
+        for port in self.get_jack_ports():
             if pattern.match(port.name):
                 return port
         return None
@@ -186,7 +185,7 @@ class JackHandler:
     def get_jack_connections(self) -> List[PortConnection]:
         """Fetch JACK connections using the jack_lsp command and return them as a list of PortConnection instances."""
         # Retrieve all Port instances
-        client, ports = self.get_jack_ports()
+        ports = self.get_jack_ports()
         port_map = {port.name: port for port in ports}  # Create a dict for easy lookup
 
         # Read the connections
@@ -212,7 +211,7 @@ class JackHandler:
 
                 # Check if the source is an output and the destination is an input
                 if source_port and dest_port and source_port.direction == "output" and dest_port.direction == "input":
-                    connection = PortConnection(client, output=source_port, input=dest_port)
+                    connection = PortConnection(self.client, output=source_port, input=dest_port)
                     # Ensure we're not adding duplicate connections
                     if connection not in connections:
                         connections.append(connection)
