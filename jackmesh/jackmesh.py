@@ -149,7 +149,8 @@ class JackHandler:
         Limitation: returns first regex match in list.
         """
         pattern = re.compile(port_regex)
-        for port in self.get_jack_ports():
+        _, ports = self.get_jack_ports()
+        for port in ports:
             if pattern.match(port.name):
                 return port
         return None
