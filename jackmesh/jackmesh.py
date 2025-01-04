@@ -235,17 +235,18 @@ class JackHandler:
         return [port for port in ports if port.client == client_name]
 
 
-def load(config_path, regex_matching=False):
+def load(config_path, regex_matching=False, disconnect=False):
     jh = JackHandler()
 
     # Load TOML configuration
     config = toml.load(config_path)
 
     # Disconnect all existing connections
-    existing_connections = jh.get_jack_connections()
-    for connection in existing_connections:
-        connection.disconnect()
-        print(f"Disconnected {connection.output.name} from {connection.input.name}")
+    if disconnect:
+        existing_connections = jh.get_jack_connections()
+        for connection in existing_connections:
+            connection.disconnect()
+            print(f"Disconnected {connection.output.name} from {connection.input.name}")
 
     # Process each section in the TOML file to establish new connections
     for client, port_map in config.items():
@@ -325,8 +326,8 @@ def main():
                         help='Dump the current connections into a TOML configuration file. Provide the path to save the file.')
     parser.add_argument('-r', '--regex', action="store_true", default=False,
                         help=f'Use regular expressions for client and port name matching')
-
-
+    parser.add_argument('-x', '--disconnect', action="store_true", default=False,
+                        help=f'Disconnect all existing connections before adding new')
 
     # Parse the provided arguments.
     args = parser.parse_args()
@@ -341,7 +342,7 @@ def main():
     if args.dump:
         dump()
     elif args.load:
-        load(args.load, regex_matching=args.regex)
+        load(args.load, regex_matching=args.regex, disconnect=args.disconnect)
 
 if __name__ == "__main__":
     main()
