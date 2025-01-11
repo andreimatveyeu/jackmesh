@@ -242,11 +242,12 @@ def load(config_path, regex_matching=False, disconnect=False):
     config = toml.load(config_path)
 
     # Disconnect all existing connections
+    existing_connections = jh.get_jack_connections()
     if disconnect:
-        existing_connections = jh.get_jack_connections()
         for connection in existing_connections:
             connection.disconnect()
             print(f"Disconnected {connection.output.name} from {connection.input.name}")
+        existing_connections = []
 
     # Process each section in the TOML file to establish new connections
     for client, port_map in config.items():
@@ -276,8 +277,11 @@ def load(config_path, regex_matching=False, disconnect=False):
                     print(f"Could not find port: {inp}")
                     continue
                 connection = PortConnection(output_port.client_ptr, output=output_port, input=input_port)
-                print(f"Connecting {output_port.name} to {input_port.name}...")
-                connection.connect()
+                if connection not in existing_connections:
+                    print(f"Connecting {output_port.name} to {input_port.name}...")
+                    connection.connect()
+                else:
+                    print(f"Connection already established: {output_port.name} to {input_port.name}")
 
 def dump():
     jh = JackHandler()
