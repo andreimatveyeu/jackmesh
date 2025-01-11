@@ -253,10 +253,10 @@ def load(config_path, regex_matching=False, disconnect=False):
     for client, port_map in config.items():
         for output, inputs in port_map.items():
             output_port_name = f"{client}:{output}"
-            if not output_port_name.startswith("regex:"):
+            if ":regex:" not in output_port_name:
                 output_port = jh.get_port_by_name(output_port_name)
             elif regex_matching:
-                output_port_name = output_port_name.replace("regex:", "")
+                output_port_name = output_port_name.replace(":regex:", ":")
                 output_port = jh.get_port_by_regex(output_port_name)
             else:
                 raise RuntimeError("Port spec {output_port_name} requires regex matching to be enabled (-r flag)")
@@ -265,10 +265,10 @@ def load(config_path, regex_matching=False, disconnect=False):
                 print(f"Could not find port: {output_port_name}")
                 continue
             for inp in inputs:
-                if not inp.startswith("regex:"):
+                if ":regex:" not in inp:
                     input_port = jh.get_port_by_name(inp)
                 elif regex_matching:
-                    inp = inp.replace("regex:", "")
+                    inp = inp.replace(":regex:", ":")
                     input_port = jh.get_port_by_regex(inp)
                 else:
                     raise RuntimeError("Port spec {output_port_name} requires regex matching to be enabled (-r flag)")
