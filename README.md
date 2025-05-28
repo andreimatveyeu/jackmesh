@@ -65,6 +65,31 @@ out1 = [ "Built-in Audio Pro:playback_AUX0",]
 out2 = [ "Built-in Audio Pro:playback_AUX1",]
 ```
 
+## Future Improvements
+
+* **Enhanced `JackHandler` Lifecycle:**
+    * Implement context manager protocol (`__enter__`/`__exit__`) for automatic client cleanup.
+    * Allow custom client names and manage client activation/deactivation explicitly.
+* **Improved Port & Connection Management:**
+    * Refine `PortConnection.disconnect` to use `jacklib.disconnect` for specific pairs.
+    * Replace `jack_lsp` subprocess for listing connections with native `jacklib` calls (e.g., `jack_port_get_all_connections`).
+    * Add method to force refresh of cached port list.
+    * Provide methods in `JackHandler` for direct connection/disconnection of ports by name or object.
+    * Correct `Port.__eq__` method to return boolean.
+* **Error Handling & Logging:**
+    * Introduce custom, specific exception classes (e.g., `JackPortNotFoundError`).
+    * Integrate the `logging` module for more flexible diagnostics.
+* **Usability & API Design:**
+    * Support wildcard/regex matching for port names in operations.
+    * Add comprehensive docstrings for all public APIs.
+    * Ensure consistent return types for methods (e.g., `get_jack_ports` to return only `List[Port]`).
+    * Remove unused internal methods like `_create_ports`.
+* **Advanced Features:**
+    * Implement support for JACK event callbacks (port registration, graph changes, server shutdown).
+* **Code Quality:**
+    * Ensure all strings passed to `jacklib` are properly encoded/decoded (UTF-8).
+    * Complete and verify type hinting.
+
 ## Contributing
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
