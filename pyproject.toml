@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jackmesh"
-version = "0.3.1"
+version = "0.3.2"
 description = "Python-based utility for managing Jack audio server connections with simple TOML config files."
 license = "GNU GPL v3"
 authors = ["omnitonal.com"]
