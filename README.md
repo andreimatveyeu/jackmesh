@@ -75,7 +75,6 @@ out2 = [ "Built-in Audio Pro:playback_AUX1",]
     * Replace `jack_lsp` subprocess for listing connections with native `jacklib` calls (e.g., `jack_port_get_all_connections`).
     * Add method to force refresh of cached port list.
     * Provide methods in `JackHandler` for direct connection/disconnection of ports by name or object.
-    * Correct `Port.__eq__` method to return boolean.
 * **Error Handling & Logging:**
     * Introduce custom, specific exception classes (e.g., `JackPortNotFoundError`).
     * Integrate the `logging` module for more flexible diagnostics.

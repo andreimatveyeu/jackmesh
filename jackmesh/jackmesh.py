@@ -37,7 +37,7 @@ class Port:
         return f"Port(name='{self.name}', client='{self.client}', port_name='{self.port_name}', type='{self.port_type}', uuid='{self.uuid}', direction='{self.direction}', aliases={self.aliases}, in_latency={self.in_latency}, out_latency={self.out_latency}, total_latency={self.total_latency})"
 
     def __eq__(self, other):
-        self.uuid == other.uuid
+        return self.uuid == other.uuid
 
 class PortConnection:
 
