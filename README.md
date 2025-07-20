@@ -47,6 +47,23 @@ jackmesh -l
 
 The assumption is that the TOML file provides the complete connection configuration and no other connections shall exist. Before applying the config file all existing connections will be removed.
 
+### Disconnecting Specific Ports
+
+You can also specify connections to be disconnected using the `disconnect:` prefix. This is useful for ensuring certain connections are not active.
+
+```toml
+[Firefox]
+"disconnect:output_FL" = [ "ardour:Firefox/audio_in 1", ]
+"disconnect:output_FR" = [ "ardour:Firefox/audio_in 2", ]
+```
+
+This also works with regular expressions:
+
+```toml
+[Midi-Bridge]
+"disconnect:regex:.*Scarlett.*MIDI.*" = [ "Pianoteq:midi_in", "mda_rhodes:event_in"]
+```
+
 ## Configuration
 
 `jackmesh` uses TOML format for its configuration files. An example of the configuration file:

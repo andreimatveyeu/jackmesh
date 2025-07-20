@@ -60,19 +60,11 @@ class PortConnection:
         return self.output.name == other.output.name and self.input.name == other.input.name
 
     def disconnect(self):
-        # Disconnect output
         status = jacklib.jack_status_t()
-        result = jacklib.port_disconnect(self.client, self.output.port_ptr)
+        result = jacklib.disconnect(self.client, self.output.name, self.input.name)
         if result != 0:
             error_msg = get_jack_status_error_string(status)
-            raise Exception(f"Error disconnecting output: {error_msg}")
-
-        # Disconnect input
-        status = jacklib.jack_status_t()
-        result = jacklib.port_disconnect(self.client, self.input.port_ptr)
-        if result != 0:
-            error_msg = get_jack_status_error_string(status)
-            raise Exception(f"Error disconnecting input: {error_msg}")
+            raise Exception(f"Error disconnecting: {error_msg}")
 
     def connect(self):
         status = jacklib.jack_status_t()
@@ -237,51 +229,74 @@ class JackHandler:
 
 def load(config_path, regex_matching=False, disconnect=False):
     jh = JackHandler()
-
-    # Load TOML configuration
     config = toml.load(config_path)
-
-    # Disconnect all existing connections
     existing_connections = jh.get_jack_connections()
+
     if disconnect:
         for connection in existing_connections:
             connection.disconnect()
             print(f"Disconnected {connection.output.name} from {connection.input.name}")
         existing_connections = []
 
-    # Process each section in the TOML file to establish new connections
+    connections_to_make = []
+    disconnections_to_make = []
+
     for client, port_map in config.items():
-        for output, inputs in port_map.items():
-            output_port_name = f"{client}:{output}"
-            if ":regex:" not in output_port_name:
-                output_port = jh.get_port_by_name(output_port_name)
-            elif regex_matching:
-                output_port_name = output_port_name.replace(":regex:", ":")
-                output_port = jh.get_port_by_regex(output_port_name)
+        for output_key, inputs in port_map.items():
+            is_disconnect = output_key.startswith("disconnect:")
+            if is_disconnect:
+                output_key = output_key[len("disconnect:"):]
+
+            output_port_name = f"{client}:{output_key}"
+            
+            output_port = None
+            if "regex:" in output_key:
+                if regex_matching:
+                    output_port_name_re = f"{client}:{output_key.replace('regex:', '')}"
+                    output_port = jh.get_port_by_regex(output_port_name_re)
+                else:
+                    raise RuntimeError(f"Port spec {output_port_name} requires regex matching to be enabled (-r flag)")
             else:
-                raise RuntimeError("Port spec {output_port_name} requires regex matching to be enabled (-r flag)")
+                output_port = jh.get_port_by_name(output_port_name)
 
             if output_port is None:
                 print(f"Could not find port: {output_port_name}")
                 continue
+
             for inp in inputs:
-                if ":regex:" not in inp:
-                    input_port = jh.get_port_by_name(inp)
-                elif regex_matching:
-                    inp = inp.replace(":regex:", ":")
-                    input_port = jh.get_port_by_regex(inp)
+                input_port = None
+                if "regex:" in inp:
+                    if regex_matching:
+                        input_port = jh.get_port_by_regex(inp.replace('regex:', ''))
+                    else:
+                        raise RuntimeError(f"Port spec {inp} requires regex matching to be enabled (-r flag)")
                 else:
-                    raise RuntimeError("Port spec {output_port_name} requires regex matching to be enabled (-r flag)")
+                    input_port = jh.get_port_by_name(inp)
 
                 if input_port is None:
                     print(f"Could not find port: {inp}")
                     continue
+                
                 connection = PortConnection(output_port.client_ptr, output=output_port, input=input_port)
-                if connection not in existing_connections:
-                    print(f"Connecting {output_port.name} to {input_port.name}...")
-                    connection.connect()
+                if is_disconnect:
+                    disconnections_to_make.append(connection)
                 else:
-                    print(f"Connection already established: {output_port.name} to {input_port.name}")
+                    connections_to_make.append(connection)
+
+    for connection in disconnections_to_make:
+        if connection in existing_connections:
+            print(f"Disconnecting {connection.output.name} from {connection.input.name}...")
+            connection.disconnect()
+            existing_connections.remove(connection)
+        else:
+            print(f"Connection not found, cannot disconnect: {connection.output.name} to {connection.input.name}")
+
+    for connection in connections_to_make:
+        if connection not in existing_connections:
+            print(f"Connecting {connection.output.name} to {connection.input.name}...")
+            connection.connect()
+        else:
+            print(f"Connection already established: {connection.output.name} to {connection.input.name}")
 
 def dump():
     jh = JackHandler()
