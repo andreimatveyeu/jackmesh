@@ -135,16 +135,10 @@ class JackHandler:
                 return port
         return None
 
-    def get_port_by_regex(self, port_regex):
-        """Get port by name regex.
-
-        Limitation: returns first regex match in list.
-        """
+    def get_ports_by_regex(self, port_regex):
+        """Get all ports matching a name regex."""
         pattern = re.compile(port_regex)
-        for port in self.get_jack_ports():
-            if pattern.match(port.name):
-                return port
-        return None
+        return [port for port in self.get_jack_ports() if pattern.match(port.name)]
 
 
     def _create_ports(self, properties_output: List[str], type_dict: Dict[str, str], uuid_dict: Dict[str, str],
@@ -247,41 +241,47 @@ def load(config_path, regex_matching=False, disconnect=False):
             if is_disconnect:
                 output_key = output_key[len("disconnect:"):]
 
-            output_port_name = f"{client}:{output_key}"
-            
-            output_port = None
+            output_ports = []
             if "regex:" in output_key:
                 if regex_matching:
-                    output_port_name_re = f"{client}:{output_key.replace('regex:', '')}"
-                    output_port = jh.get_port_by_regex(output_port_name_re)
+                    # The regex is not prefixed with client name, to be consistent with input ports
+                    output_port_name_re = output_key.replace('regex:', '')
+                    output_ports.extend(jh.get_ports_by_regex(output_port_name_re))
                 else:
-                    raise RuntimeError(f"Port spec {output_port_name} requires regex matching to be enabled (-r flag)")
+                    raise RuntimeError(f"Port spec {output_key} requires regex matching to be enabled (-r flag)")
             else:
+                output_port_name = f"{client}:{output_key}"
                 output_port = jh.get_port_by_name(output_port_name)
+                if output_port:
+                    output_ports.append(output_port)
 
-            if output_port is None:
-                print(f"Could not find port: {output_port_name}")
+            if not output_ports:
+                print(f"Could not find any port for: {output_key}")
                 continue
 
-            for inp in inputs:
-                input_port = None
-                if "regex:" in inp:
-                    if regex_matching:
-                        input_port = jh.get_port_by_regex(inp.replace('regex:', ''))
+            for output_port in output_ports:
+                for inp in inputs:
+                    input_ports = []
+                    if "regex:" in inp:
+                        if regex_matching:
+                            input_ports.extend(jh.get_ports_by_regex(inp.replace('regex:', '')))
+                        else:
+                            raise RuntimeError(f"Port spec {inp} requires regex matching to be enabled (-r flag)")
                     else:
-                        raise RuntimeError(f"Port spec {inp} requires regex matching to be enabled (-r flag)")
-                else:
-                    input_port = jh.get_port_by_name(inp)
+                        input_port = jh.get_port_by_name(inp)
+                        if input_port:
+                            input_ports.append(input_port)
 
-                if input_port is None:
-                    print(f"Could not find port: {inp}")
-                    continue
-                
-                connection = PortConnection(output_port.client_ptr, output=output_port, input=input_port)
-                if is_disconnect:
-                    disconnections_to_make.append(connection)
-                else:
-                    connections_to_make.append(connection)
+                    if not input_ports:
+                        print(f"Could not find any port for: {inp}")
+                        continue
+                    
+                    for input_port in input_ports:
+                        connection = PortConnection(output_port.client_ptr, output=output_port, input=input_port)
+                        if is_disconnect:
+                            disconnections_to_make.append(connection)
+                        else:
+                            connections_to_make.append(connection)
 
     for connection in disconnections_to_make:
         if connection in existing_connections:
