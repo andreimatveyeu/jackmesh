@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Literal
 import jacklib
 from jacklib.helpers import c_char_p_p_to_list, get_jack_status_error_string
@@ -39,6 +40,9 @@ class Port:
     def __eq__(self, other):
         return self.uuid == other.uuid
 
+    def __hash__(self):
+        return hash(self.uuid)
+
 class PortConnection:
 
     def __init__(self, client, output: Optional['Port'] = None, input: Optional['Port'] = None):
@@ -58,6 +62,9 @@ class PortConnection:
         if not isinstance(other, PortConnection):
             return False
         return self.output.name == other.output.name and self.input.name == other.input.name
+
+    def __hash__(self):
+        return hash((self.output.name, self.input.name))
 
     def disconnect(self):
         status = jacklib.jack_status_t()
@@ -222,59 +229,94 @@ class JackHandler:
 
 
 def load(config_path, regex_matching=False, disconnect=False):
+    """
+    Loads JACK connections from a TOML configuration file.
+
+    This function reads a specified TOML file to determine which JACK ports to connect or disconnect.
+    It can handle both explicit port names and regular expressions for more flexible configurations.
+    It also has an option to disconnect all existing connections before applying the new ones.
+
+    Args:
+        config_path (str): The path to the TOML configuration file.
+        regex_matching (bool, optional): If True, allows the use of regular expressions for port names
+                                         in the config file. Defaults to False.
+        disconnect (bool, optional): If True, all existing JACK connections will be disconnected before
+                                     the new connections from the config file are made. Defaults to False.
+    """
+    # Initialize the JackHandler to interact with the JACK server.
     jh = JackHandler()
+    # Load the connection configuration from the specified TOML file.
     config = toml.load(config_path)
+    # Retrieve a list of all currently active JACK connections.
     existing_connections = jh.get_jack_connections()
 
+    # If the 'disconnect' flag is set, disconnect all existing connections.
+    # This is useful for ensuring a clean state before applying a new configuration.
     if disconnect:
-        for connection in existing_connections:
+        def disconnect_all_and_print(connection):
             connection.disconnect()
             print(f"Disconnected {connection.output.name} from {connection.input.name}")
+
+        with ThreadPoolExecutor() as executor:
+            list(executor.map(disconnect_all_and_print, existing_connections))
+        # After disconnecting, the list of existing connections is cleared.
         existing_connections = []
 
+    # Prepare lists to hold the connection and disconnection operations defined in the config.
     connections_to_make = []
     disconnections_to_make = []
 
+    # Iterate over the configuration file, which is structured by client, then by output port.
     for client, port_map in config.items():
         for output_key, inputs in port_map.items():
+            # Check if the operation is a disconnection (prefixed with "disconnect:").
             is_disconnect = output_key.startswith("disconnect:")
             if is_disconnect:
                 output_key = output_key[len("disconnect:"):]
 
+            # Resolve the output port(s) from the configuration key.
             output_ports = []
             if "regex:" in output_key:
                 if regex_matching:
+                    # If regex is enabled, construct the regex pattern and find matching ports.
                     output_port_name_re = f"{client}:{output_key.replace('regex:', '')}"
                     output_ports.extend(jh.get_ports_by_regex(output_port_name_re))
                 else:
                     raise RuntimeError(f"Port spec {output_key} requires regex matching to be enabled (-r flag)")
             else:
+                # For non-regex, find the port by its exact name.
                 output_port_name = f"{client}:{output_key}"
                 output_port = jh.get_port_by_name(output_port_name)
                 if output_port:
                     output_ports.append(output_port)
 
+            # If no matching output ports are found, print a warning and skip.
             if not output_ports:
                 print(f"Could not find any port for: {output_key}")
                 continue
 
+            # For each resolved output port, resolve the corresponding input port(s).
             for output_port in output_ports:
                 for inp in inputs:
                     input_ports = []
                     if "regex:" in inp:
                         if regex_matching:
+                            # Handle regex for input ports.
                             input_ports.extend(jh.get_ports_by_regex(inp.replace('regex:', '')))
                         else:
                             raise RuntimeError(f"Port spec {inp} requires regex matching to be enabled (-r flag)")
                     else:
+                        # Handle exact names for input ports.
                         input_port = jh.get_port_by_name(inp)
                         if input_port:
                             input_ports.append(input_port)
 
+                    # If no matching input ports are found, print a warning and skip.
                     if not input_ports:
                         print(f"Could not find any port for: {inp}")
                         continue
-                    
+
+                    # Create PortConnection objects for each valid output-input pair.
                     for input_port in input_ports:
                         connection = PortConnection(output_port.client_ptr, output=output_port, input=input_port)
                         if is_disconnect:
@@ -282,20 +324,48 @@ def load(config_path, regex_matching=False, disconnect=False):
                         else:
                             connections_to_make.append(connection)
 
+    # --- Execute Disconnections ---
+    # A helper function to print and perform disconnection.
+    def disconnect_and_print(connection):
+        print(f"Disconnecting {connection.output.name} from {connection.input.name}...")
+        connection.disconnect()
+
+    # Filter the list of disconnections to only include those that actually exist.
+    actual_disconnections = []
     for connection in disconnections_to_make:
         if connection in existing_connections:
-            print(f"Disconnecting {connection.output.name} from {connection.input.name}...")
-            connection.disconnect()
-            existing_connections.remove(connection)
+            actual_disconnections.append(connection)
         else:
             print(f"Connection not found, cannot disconnect: {connection.output.name} to {connection.input.name}")
 
+    # Perform the disconnections in parallel for efficiency.
+    if actual_disconnections:
+        with ThreadPoolExecutor() as executor:
+            list(executor.map(disconnect_and_print, actual_disconnections))
+
+        # Update the list of existing connections by removing the ones that were disconnected.
+        existing_connections_set = set(existing_connections)
+        actual_disconnections_set = set(actual_disconnections)
+        existing_connections = list(existing_connections_set - actual_disconnections_set)
+
+    # --- Execute Connections ---
+    # A helper function to print and perform connection.
+    def connect_and_print(connection):
+        print(f"Connecting {connection.output.name} to {connection.input.name}...")
+        connection.connect()
+
+    # Filter the list of connections to only include those that don't already exist.
+    actual_connections = []
     for connection in connections_to_make:
         if connection not in existing_connections:
-            print(f"Connecting {connection.output.name} to {connection.input.name}...")
-            connection.connect()
+            actual_connections.append(connection)
         else:
             print(f"Connection already established: {connection.output.name} to {connection.input.name}")
+
+    # Perform the new connections in parallel.
+    if actual_connections:
+        with ThreadPoolExecutor() as executor:
+            list(executor.map(connect_and_print, actual_connections))
 
 def dump():
     jh = JackHandler()
