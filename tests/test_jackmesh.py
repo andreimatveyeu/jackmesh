@@ -68,7 +68,7 @@ class TestJackmesh(unittest.TestCase):
         input_port2 = Port(MagicMock(), "SomeOtherClient:input2", "SomeOtherClient", MagicMock(), "input2", "audio", "uuid4", "input", [], 0, 0, 0)
 
         mock_handler_instance.get_ports_by_regex.side_effect = lambda regex: {
-            "output.*": [output_port1, output_port2],
+            "TestClient:output.*": [output_port1, output_port2],
             "input.*": [input_port1, input_port2]
         }.get(regex, [])
 

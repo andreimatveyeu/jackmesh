@@ -244,8 +244,7 @@ def load(config_path, regex_matching=False, disconnect=False):
             output_ports = []
             if "regex:" in output_key:
                 if regex_matching:
-                    # The regex is not prefixed with client name, to be consistent with input ports
-                    output_port_name_re = output_key.replace('regex:', '')
+                    output_port_name_re = f"{client}:{output_key.replace('regex:', '')}"
                     output_ports.extend(jh.get_ports_by_regex(output_port_name_re))
                 else:
                     raise RuntimeError(f"Port spec {output_key} requires regex matching to be enabled (-r flag)")
