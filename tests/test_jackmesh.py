@@ -1,6 +1,9 @@
+import os
+import tempfile
+import textwrap
 import unittest
 from unittest.mock import MagicMock, patch
-from jackmesh.jackmesh import load, Port, PortConnection
+from jackmesh.jackmesh import load, Port, PortConnection, _load_config_file, _merge_configs
 
 class TestJackmesh(unittest.TestCase):
 
@@ -80,6 +83,85 @@ class TestJackmesh(unittest.TestCase):
         # Assertions
         # Verify that connect is called for all combinations of matching ports
         self.assertEqual(mock_connect.call_count, 4)
+
+class TestIncludes(unittest.TestCase):
+
+    def _write(self, dirpath, name, body):
+        path = os.path.join(dirpath, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(textwrap.dedent(body))
+        return path
+
+    def test_merge_concats_and_dedupes_lists(self):
+        base = {"Client": {"out": ["a", "b"]}}
+        _merge_configs(base, {"Client": {"out": ["b", "c"]}})
+        self.assertEqual(base, {"Client": {"out": ["a", "b", "c"]}})
+
+    def test_merge_preserves_disjoint_keys(self):
+        base = {"Client": {"out1": ["a"]}}
+        _merge_configs(base, {"Client": {"out2": ["b"]}, "Other": {"x": ["y"]}})
+        self.assertEqual(base, {
+            "Client": {"out1": ["a"], "out2": ["b"]},
+            "Other": {"x": ["y"]},
+        })
+
+    def test_include_resolves_relative_paths_and_merges(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(tmp, "midi.toml", """
+                [Pianoteq]
+                out_1 = ["system:playback_FL"]
+            """)
+            self._write(tmp, "sub/extra.toml", """
+                [Pianoteq]
+                out_1 = ["system:playback_FR"]
+                out_2 = ["other:in"]
+            """)
+            root = self._write(tmp, "root.toml", """
+                include = ["midi.toml", "sub/extra.toml"]
+
+                [REAPER]
+                out1 = ["system:playback_FL"]
+            """)
+
+            cfg = _load_config_file(root)
+            self.assertEqual(cfg, {
+                "Pianoteq": {
+                    "out_1": ["system:playback_FL", "system:playback_FR"],
+                    "out_2": ["other:in"],
+                },
+                "REAPER": {"out1": ["system:playback_FL"]},
+            })
+
+    def test_disconnect_keys_merge_across_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(tmp, "a.toml", """
+                [Firefox]
+                "disconnect:output_FL" = ["ardour:Firefox/audio_in 1"]
+            """)
+            root = self._write(tmp, "root.toml", """
+                include = ["a.toml"]
+
+                [Firefox]
+                "disconnect:output_FL" = ["ardour:Firefox/audio_in 2"]
+            """)
+            cfg = _load_config_file(root)
+            self.assertEqual(cfg["Firefox"]["disconnect:output_FL"], [
+                "ardour:Firefox/audio_in 1",
+                "ardour:Firefox/audio_in 2",
+            ])
+
+    def test_circular_include_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = os.path.join(tmp, "a.toml")
+            b = os.path.join(tmp, "b.toml")
+            with open(a, "w") as f:
+                f.write('include = ["b.toml"]\n')
+            with open(b, "w") as f:
+                f.write('include = ["a.toml"]\n')
+            with self.assertRaises(RuntimeError):
+                _load_config_file(a)
+
 
 if __name__ == '__main__':
     unittest.main()

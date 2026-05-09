@@ -82,6 +82,41 @@ out1 = [ "Built-in Audio Pro:playback_AUX0",]
 out2 = [ "Built-in Audio Pro:playback_AUX1",]
 ```
 
+### Splitting a configuration across multiple files
+
+A configuration file can pull in other files via a top-level `include` array.
+Paths are resolved relative to the including file (absolute paths are also
+accepted), and includes are followed recursively. Circular includes are
+detected and raise an error.
+
+```toml
+# ~/.jack_connections.toml
+include = [
+    "midi.toml",
+    "daw/reaper.toml",
+]
+
+[Pianoteq]
+out_1 = [ "system:playback_FL",]
+```
+
+When the same client/port appears in more than one file, the lists are
+**merged** (concatenated, with duplicates removed) rather than overridden, so
+each file complements the others. This applies to both connection lists and
+`disconnect:` lists. For example, given:
+
+```toml
+# midi.toml
+[Pianoteq]
+out_2 = [ "system:playback_FR",]
+```
+
+and the root file above, the effective configuration for `Pianoteq` becomes
+`out_1 = ["system:playback_FL"]` and `out_2 = ["system:playback_FR"]`.
+
+The key `include` is reserved at the top level and cannot be used as a JACK
+client name.
+
 ## Future Improvements
 
 * **Enhanced `JackHandler` Lifecycle:**

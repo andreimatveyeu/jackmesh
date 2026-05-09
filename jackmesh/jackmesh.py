@@ -228,6 +228,61 @@ class JackHandler:
         return [port for port in ports if port.client == client_name]
 
 
+INCLUDE_KEY = "include"
+
+
+def _merge_configs(base: dict, new: dict) -> None:
+    """Merge `new` into `base` in place.
+
+    Dicts are merged recursively. Lists are concatenated with order-preserving
+    dedup so the same port target listed in multiple files appears only once.
+    On type mismatch the new value replaces the existing one.
+    """
+    for key, val in new.items():
+        if key not in base:
+            base[key] = list(val) if isinstance(val, list) else val
+        elif isinstance(base[key], dict) and isinstance(val, dict):
+            _merge_configs(base[key], val)
+        elif isinstance(base[key], list) and isinstance(val, list):
+            seen = set(base[key])
+            for item in val:
+                if item not in seen:
+                    base[key].append(item)
+                    seen.add(item)
+        else:
+            base[key] = val
+
+
+def _load_config_file(config_path: str, _chain: Optional[set] = None) -> dict:
+    """Load a TOML config file, recursively resolving any top-level `include` array.
+
+    `include` entries are paths relative to the file containing the directive
+    (or absolute). Included files are merged in first, then the including
+    file's own keys are merged on top. Same-key lists are concat-deduped, so a
+    port specified in multiple files complements rather than overrides.
+    """
+    abs_path = os.path.abspath(config_path)
+    if _chain is None:
+        _chain = set()
+    if abs_path in _chain:
+        raise RuntimeError(f"Circular include detected at {abs_path}")
+    next_chain = _chain | {abs_path}
+
+    raw = toml.load(abs_path)
+    includes = raw.pop(INCLUDE_KEY, [])
+    if not isinstance(includes, list) or not all(isinstance(p, str) for p in includes):
+        raise RuntimeError(f"`{INCLUDE_KEY}` in {abs_path} must be a list of path strings")
+
+    merged: dict = {}
+    base_dir = os.path.dirname(abs_path)
+    for inc in includes:
+        inc_path = inc if os.path.isabs(inc) else os.path.join(base_dir, inc)
+        _merge_configs(merged, _load_config_file(inc_path, next_chain))
+
+    _merge_configs(merged, raw)
+    return merged
+
+
 def load(config_path, regex_matching=False, disconnect=False):
     """
     Loads JACK connections from a TOML configuration file.
@@ -235,6 +290,11 @@ def load(config_path, regex_matching=False, disconnect=False):
     This function reads a specified TOML file to determine which JACK ports to connect or disconnect.
     It can handle both explicit port names and regular expressions for more flexible configurations.
     It also has an option to disconnect all existing connections before applying the new ones.
+
+    Configuration files may include other configuration files via a top-level
+    `include = ["other.toml", ...]` array. Paths are resolved relative to the
+    including file. Connections specified for the same port across multiple
+    files are merged (complement, not override).
 
     Args:
         config_path (str): The path to the TOML configuration file.
@@ -245,8 +305,8 @@ def load(config_path, regex_matching=False, disconnect=False):
     """
     # Initialize the JackHandler to interact with the JACK server.
     jh = JackHandler()
-    # Load the connection configuration from the specified TOML file.
-    config = toml.load(config_path)
+    # Load the connection configuration, resolving any `include` directives.
+    config = _load_config_file(config_path)
     # Retrieve a list of all currently active JACK connections.
     existing_connections = jh.get_jack_connections()
 
