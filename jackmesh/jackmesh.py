@@ -1,20 +1,12 @@
-import subprocess
 import toml
 import argparse
 import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Literal
+from typing import List, Literal, Dict, Tuple, Optional
 import jacklib
 from jacklib.helpers import c_char_p_p_to_list, get_jack_status_error_string
-
-import subprocess
-from typing import List, Dict
-
-import subprocess
-from typing import List, Dict, Tuple
-from typing import Optional
 
 
 class Port:
@@ -176,39 +168,22 @@ class JackHandler:
         return ports
 
     def get_jack_connections(self) -> List[PortConnection]:
-        """Fetch JACK connections using the jack_lsp command and return them as a list of PortConnection instances."""
-        # Retrieve all Port instances
         ports = self.get_jack_ports()
-        port_map = {port.name: port for port in ports}  # Create a dict for easy lookup
+        port_map = {port.name: port for port in ports}
 
-        # Read the connections
-        output = subprocess.check_output(["jack_lsp", "-c"], text=True).strip().split("\n")
-
-        # Create PortConnection instances
         connections = []
-        i = 0
-        while i < len(output):
-            source_name = output[i].strip()
-            source_port = port_map.get(source_name)
-
-            # Ensure the next line exists and it's a destination.
-            if i + 1 < len(output) and not output[i+1].startswith("   "):
-                i += 1
+        for port in ports:
+            if port.direction != 'output':
                 continue
-
-            # Loop over destinations
-            i += 1
-            while i < len(output) and output[i].startswith("   "):
-                dest_name = output[i].strip()
+            connected_names = c_char_p_p_to_list(
+                jacklib.port_get_all_connections(self.client, port.port_ptr)
+            )
+            for dest_name in connected_names:
                 dest_port = port_map.get(dest_name)
-
-                # Check if the source is an output and the destination is an input
-                if source_port and dest_port and source_port.direction == "output" and dest_port.direction == "input":
-                    connection = PortConnection(self.client, output=source_port, input=dest_port)
-                    # Ensure we're not adding duplicate connections
+                if dest_port:
+                    connection = PortConnection(self.client, output=port, input=dest_port)
                     if connection not in connections:
                         connections.append(connection)
-                i += 1
 
         return connections
 
