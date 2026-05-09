@@ -175,10 +175,7 @@ class JackHandler:
         for port in ports:
             if port.direction != 'output':
                 continue
-            connected_names = c_char_p_p_to_list(
-                jacklib.port_get_all_connections(self.client, port.port_ptr)
-            )
-            for dest_name in connected_names:
+            for dest_name in (jacklib.port_get_all_connections(self.client, port.port_ptr) or []):
                 dest_port = port_map.get(dest_name)
                 if dest_port:
                     connection = PortConnection(self.client, output=port, input=dest_port)
